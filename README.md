@@ -45,7 +45,7 @@ pip install scipy
 ### Method 2: Git Clone
 ```bash
 cd ComfyUI/custom_nodes/
-git clone <your-repo-url> comfyui-feedback-sampler
+git clone https://github.com/pizurny/Comfyui-FeedbackSampler
 pip install scipy
 ```
 
