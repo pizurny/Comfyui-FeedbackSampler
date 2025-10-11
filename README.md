@@ -1,6 +1,6 @@
 # ComfyUI Feedback Sampler
 
-A custom ComfyUI node for creating **Deforum-style zoom animations** through iterative feedback loops with LAB color coherence and anti-blur technology.
+A custom ComfyUI node for creating **Deforum-style zoom animations** through iterative feedback loop.
 
 ![Demo](demo.gif)
 
@@ -15,7 +15,7 @@ A custom ComfyUI node for creating **Deforum-style zoom animations** through ite
 - **Contrast Boost** - Keeps colors vibrant
 - **Batch Output** - All frames as sequence for video creation
 
-**Inspired by [Deforum Stable Diffusion](https://github.com/deforum-art/sd-webui-deforum)**
+**Inspired by [Deforum Stable Diffusion](https://colab.research.google.com/github/deforum-art/deforum-stable-diffusion/blob/main/Deforum_Stable_Diffusion.ipynb)**
 
 ## Compatibility
 
