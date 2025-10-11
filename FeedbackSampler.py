@@ -1,4 +1,3 @@
-# Project: ComfyUI Feedback Sampler | Version: 1.3.0 | Date: 2025-10-09T01:15:00Z | AI: Claude Sonnet 4.5
 import torch
 import torch.nn.functional as F
 from comfy.samplers import KSampler
@@ -10,13 +9,13 @@ import latent_preview
 import numpy as np
 from PIL import Image
 
-# Try to import scipy for sharpening
+# Try to import scipy for sharpening and noise
 try:
-    from scipy.ndimage import gaussian_filter
+    from scipy.ndimage import gaussian_filter, zoom as scipy_zoom
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-    print("WARNING: scipy not available. Sharpening will be disabled. Install with: pip install scipy")
+    print("WARNING: scipy not available. Sharpening and Perlin noise will be disabled. Install with: pip install scipy")
 
 
 class FeedbackSampler:
@@ -30,6 +29,7 @@ class FeedbackSampler:
     def INPUT_TYPES(cls):
         return {
             "required": {
+                # === Standard KSampler Parameters ===
                 "model": ("MODEL",),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
@@ -40,12 +40,17 @@ class FeedbackSampler:
                 "negative": ("CONDITIONING",),
                 "latent_image": ("LATENT",),
                 "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                
+                # === Animation Parameters ===
                 "zoom_value": ("FLOAT", {"default": 0.01, "min": -0.5, "max": 0.5, "step": 0.0001, "round": 0.0001}),
                 "iterations": ("INT", {"default": 5, "min": 1, "max": 100}),
                 "feedback_denoise": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "seed_variation": (["fixed", "increment", "random"], {"default": "fixed"}),
+                
+                # === Color & Quality Enhancement ===
                 "color_coherence": (["None", "LAB", "RGB", "HSV"], {"default": "LAB"}),
-                "noise_amount": ("FLOAT", {"default": 0.02, "min": 0.0, "max": 0.1, "step": 0.001}),
+                "noise_amount": ("FLOAT", {"default": 0.02, "min": 0.0, "max": 1.0, "step": 0.001, "round": 0.001}),
+                "noise_type": (["gaussian", "perlin"], {"default": "perlin"}),
                 "sharpen_amount": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "contrast_boost": ("FLOAT", {"default": 1.0, "min": 0.8, "max": 1.5, "step": 0.01}),
             },
@@ -187,7 +192,7 @@ class FeedbackSampler:
         return np.clip(lab, 0, 255).astype(np.uint8)
     
     def lab_to_rgb(self, lab):
-        """Convert LAB back to RGB"""
+        """Convert LAB back to RGB with proper bounds checking"""
         # Unscale from 0-255
         lab_float = lab.astype(np.float32)
         lab_float[:, :, 0] = lab_float[:, :, 0] * 100.0 / 255.0  # L: 0-255 -> 0-100
@@ -199,6 +204,11 @@ class FeedbackSampler:
         fx = lab_float[:, :, 1] / 500 + fy
         fz = fy - lab_float[:, :, 2] / 200
         
+        # Ensure positive values before power operations
+        fx = np.maximum(fx, 0.0)
+        fy = np.maximum(fy, 0.0)
+        fz = np.maximum(fz, 0.0)
+        
         mask_x = fx > 0.2068966
         mask_y = fy > 0.2068966
         mask_z = fz > 0.2068966
@@ -207,6 +217,9 @@ class FeedbackSampler:
         xyz[:, :, 0] = np.where(mask_x, np.power(fx, 3), (fx - 16/116) / 7.787)
         xyz[:, :, 1] = np.where(mask_y, np.power(fy, 3), (fy - 16/116) / 7.787)
         xyz[:, :, 2] = np.where(mask_z, np.power(fz, 3), (fz - 16/116) / 7.787)
+        
+        # Clip XYZ to valid range
+        xyz = np.clip(xyz, 0.0, 1.0)
         
         # Denormalize by D65 white point
         xyz[:, :, 0] *= 0.95047
@@ -219,13 +232,24 @@ class FeedbackSampler:
         rgb_linear[:, :, 1] = xyz[:, :, 0] * -0.9692660 + xyz[:, :, 1] *  1.8760108 + xyz[:, :, 2] *  0.0415560
         rgb_linear[:, :, 2] = xyz[:, :, 0] *  0.0556434 + xyz[:, :, 1] * -0.2040259 + xyz[:, :, 2] *  1.0572252
         
-        # Apply gamma correction
+        # Clip to valid range before gamma correction (CRITICAL!)
+        rgb_linear = np.clip(rgb_linear, 0.0, 1.0)
+        
+        # Apply gamma correction - now safe from negative values
         mask = rgb_linear > 0.0031308
         rgb = np.where(mask,
                       1.055 * np.power(rgb_linear, 1/2.4) - 0.055,
                       12.92 * rgb_linear)
         
-        return np.clip(rgb * 255, 0, 255).astype(np.uint8)
+        # Final clip and convert
+        rgb = np.clip(rgb * 255, 0, 255).astype(np.uint8)
+        
+        # Safety check for NaN or Inf
+        if np.any(np.isnan(rgb)) or np.any(np.isinf(rgb)):
+            print("  WARNING: Invalid values detected in LAB->RGB conversion, using fallback")
+            return np.zeros_like(rgb, dtype=np.uint8) + 128  # Return gray as fallback
+        
+        return rgb
     
     def rgb_to_hsv(self, rgb):
         """Convert RGB to HSV"""
@@ -312,6 +336,87 @@ class FeedbackSampler:
         # Encode to latent
         latent = vae.encode(img_tensor)
         return latent
+    
+    def generate_perlin_noise(self, shape, scale=10, octaves=4):
+        """
+        Generate Perlin-like noise for organic texture - SIMPLIFIED for performance.
+        Creates structured noise instead of random static.
+        
+        Args:
+            shape: (H, W, C) for the noise
+            scale: Lower = larger features (default 10)
+            octaves: More = more detail layers (default 4)
+        """
+        if not SCIPY_AVAILABLE:
+            print("    [Perlin noise unavailable without scipy, using Gaussian]", flush=True)
+            return np.random.randn(*shape).astype(np.float32) * 0.5 + 0.5
+        
+        H, W, C = shape
+        noise = np.zeros(shape, dtype=np.float32)
+        
+        print(f"    [Generating Perlin noise {H}x{W}x{C}...]", end=" ", flush=True)
+        
+        for c in range(C):
+            channel_noise = np.zeros((H, W), dtype=np.float32)
+            
+            for octave in range(octaves):
+                freq = 2 ** octave
+                amp = 1.0 / (2 ** octave)
+                
+                # Generate random base at lower resolution
+                grid_size = max(4, scale // freq)
+                grid_h = H // grid_size + 2
+                grid_w = W // grid_size + 2
+                
+                # Generate random values at grid points
+                grid_noise = np.random.randn(grid_h, grid_w).astype(np.float32) * amp
+                
+                # Upsample using bilinear interpolation (much faster than per-pixel)
+                upsampled = scipy_zoom(grid_noise, (H / grid_h, W / grid_w), order=1)
+                
+                # Crop to exact size
+                upsampled = upsampled[:H, :W]
+                
+                channel_noise += upsampled
+            
+            noise[:, :, c] = channel_noise
+        
+        # Normalize to 0-1 range
+        noise = (noise - noise.min()) / (noise.max() - noise.min() + 1e-8)
+        print("Done!", flush=True)
+        return noise
+    
+    def apply_noise_pixel(self, image, amount, noise_type="gaussian"):
+        """
+        Add noise in pixel space (after color coherence).
+        This is critical - adding noise BEFORE color coherence gets removed by histogram matching!
+        
+        Args:
+            image: numpy array (H, W, C), values 0-255
+            amount: noise strength (0-1)
+            noise_type: "gaussian" or "perlin"
+        """
+        if amount <= 0:
+            return image
+        
+        img_float = image.astype(np.float32)
+        
+        if noise_type == "perlin":
+            # Generate Perlin noise (organic, structured)
+            noise = self.generate_perlin_noise(image.shape, scale=8, octaves=4)
+            # Scale to -1 to 1 range
+            noise = (noise - 0.5) * 2.0
+            # Scale by amount (treat amount as intensity)
+            noise_scaled = noise * (amount * 30.0)  # 30 is max intensity
+        else:
+            # Gaussian noise (random static)
+            noise = np.random.randn(*image.shape).astype(np.float32)
+            noise_scaled = noise * (amount * 15.0)  # 15 is max intensity
+        
+        # Add noise to image
+        noisy = img_float + noise_scaled
+        
+        return np.clip(noisy, 0, 255).astype(np.uint8)
     
     def apply_noise(self, latent, amount):
         """
@@ -421,7 +526,7 @@ class FeedbackSampler:
     
     def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, 
                latent_image, denoise, zoom_value, iterations, feedback_denoise, seed_variation,
-               color_coherence, noise_amount, sharpen_amount, contrast_boost, vae=None):
+               color_coherence, noise_amount, noise_type="perlin", sharpen_amount=0.1, contrast_boost=1.0, vae=None):
         """
         Main sampling function with feedback loop, zoom, and color coherence.
         """
@@ -441,7 +546,7 @@ class FeedbackSampler:
         latent_format = latent_image.copy()
         
         # First iteration with full denoise
-        print(f"FeedbackSampler v1.3.0: Starting iteration 1/{iterations} with denoise={denoise}")
+        print(f"FeedbackSampler v1.4.3: Starting iteration 1/{iterations} with denoise={denoise}")
         latent_format["samples"] = current_latent
         
         # Sample first iteration
@@ -468,42 +573,58 @@ class FeedbackSampler:
             else:  # random
                 iteration_seed = random.randint(0, 0xffffffffffffffff)
             
-            print(f"FeedbackSampler: Iteration {i+1}/{iterations} | zoom={zoom_value} | denoise={feedback_denoise} | seed={iteration_seed} | noise={noise_amount} | sharpen={sharpen_amount}")
+            print(f"FeedbackSampler: Iteration {i+1}/{iterations} | zoom={zoom_value} | denoise={feedback_denoise} | seed={iteration_seed} | noise={noise_amount}({noise_type}) | sharpen={sharpen_amount}")
             
             # Apply zoom transformation
             zoomed_latent = self.zoom_latent(current_latent, zoom_value)
             
-            # Add noise to prevent stagnation (critical for low denoise values)
-            if noise_amount > 0:
-                zoomed_latent = self.apply_noise(zoomed_latent, noise_amount)
-            
             # CRITICAL: Apply color coherence + enhancements BEFORE generation
             if color_coherence != "None" and vae is not None and color_reference is not None:
                 try:
+                    print(f"  [1/6] Decoding latent to image...", end=" ", flush=True)
                     # Decode zoomed latent to image
                     current_image = self.latent_to_image(zoomed_latent, vae)
+                    print(f"OK ({current_image.shape})", flush=True)
                     
+                    print(f"  [2/6] Matching colors ({color_coherence})...", end=" ", flush=True)
                     # Match colors to reference frame
                     matched_image = self.match_color_histogram(current_image, color_reference, color_coherence)
+                    print(f"OK", flush=True)
                     
                     # Apply contrast boost to prevent washed-out colors
                     if contrast_boost != 1.0:
+                        print(f"  [3/6] Applying contrast boost ({contrast_boost})...", end=" ", flush=True)
                         matched_image = self.apply_contrast(matched_image, contrast_boost)
+                        print(f"OK", flush=True)
                     
                     # Apply sharpening to recover detail (CRITICAL for low denoise)
                     if sharpen_amount > 0:
+                        print(f"  [4/6] Applying sharpening ({sharpen_amount})...", end=" ", flush=True)
                         matched_image = self.apply_sharpening(matched_image, sharpen_amount)
+                        print(f"OK", flush=True)
                     
+                    # ADD NOISE IN PIXEL SPACE (after color matching, so it doesn't get removed!)
+                    # This is critical for adding detail to flat/solid color areas
+                    if noise_amount > 0:
+                        print(f"  [5/6] Adding {noise_type} noise ({noise_amount})...", flush=True)
+                        matched_image = self.apply_noise_pixel(matched_image, noise_amount, noise_type)
+                        print(f"  [5/6] Noise added OK", flush=True)
+                    
+                    print(f"  [6/6] Encoding image to latent...", end=" ", flush=True)
                     # Encode back to latent
                     matched_latent = self.image_to_latent(matched_image, vae)
+                    print(f"OK ({matched_latent.shape})", flush=True)
                     
                     zoomed_latent = matched_latent
-                    print(f"  ✓ Color coherence + enhancements applied")
+                    print(f"  ✓ All enhancements applied successfully", flush=True)
                 except Exception as e:
                     import traceback
-                    print(f"  ✗ Color matching failed: {e}")
-                    print(traceback.format_exc())
-                    print(f"  Continuing without color correction for this frame...")
+                    print(f"\n  ✗ ERROR in color/enhancement pipeline: {e}", flush=True)
+                    print(traceback.format_exc(), flush=True)
+                    print(f"  Continuing without color correction for this frame...", flush=True)
+            elif noise_amount > 0:
+                # If no color coherence but noise requested, add in latent space as fallback
+                zoomed_latent = self.apply_noise(zoomed_latent, noise_amount)
             
             # Prepare for next sampling
             latent_format["samples"] = zoomed_latent
@@ -533,5 +654,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FeedbackSampler": "Feedback Sampler (Zoom + Anti-Blur)"
+    "FeedbackSampler": "Feedback Sampler"
 }
