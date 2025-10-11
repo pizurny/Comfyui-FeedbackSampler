@@ -4,27 +4,27 @@ A custom ComfyUI node for creating **Deforum-style zoom animations** through ite
 
 ![Demo](demo.gif)
 
-> **⚠️ Work in Progress** - Active development, features and parameters may change
+> **Work in Progress** - Active development, features and parameters may change
 
-## 🎯 Features
+## Features
 
-- 🔄 **Feedback Loop Animation** - Iterative sampling with zoom in/out
-- 🎨 **LAB Color Coherence** - Deforum-inspired color matching prevents chromatic drift
-- ⚡ **Anti-Blur Sharpening** - Maintains detail at low denoise values
-- 🎲 **Noise Injection** - Prevents stagnation (Gaussian/Perlin)
-- 🌈 **Contrast Boost** - Keeps colors vibrant
-- 📹 **Batch Output** - All frames as sequence for video creation
+- **Feedback Loop Animation** - Iterative sampling with zoom in/out
+- **LAB Color Coherence** - Deforum-inspired color matching prevents chromatic drift
+- **Anti-Blur Sharpening** - Maintains detail at low denoise values
+- **Noise Injection** - Prevents stagnation (Gaussian/Perlin)
+- **Contrast Boost** - Keeps colors vibrant
+- **Batch Output** - All frames as sequence for video creation
 
 **Inspired by [Deforum Stable Diffusion](https://github.com/deforum-art/sd-webui-deforum)**
 
-## 🔧 Compatibility
+## Compatibility
 
 Works with:
-- ✅ Stable Diffusion 1.5
-- ✅ SDXL
-- ✅ Flux models
+- Stable Diffusion 1.5
+- SDXL
+- Flux models
 
-## 📦 Installation
+## Installation
 
 1. Clone into `custom_nodes` folder:
 ```bash
@@ -46,7 +46,7 @@ python_embeded\python.exe -m pip install -r ComfyUI\custom_nodes\Comfyui-Feedbac
 
 Find node at: **Add Node → sampling → custom → Feedback Sampler**
 
-## 🎮 Quick Start
+## Quick Start
 
 1. Connect model, CLIP conditioning, latent, and **VAE** (required)
 2. Set parameters:
@@ -56,7 +56,7 @@ Find node at: **Add Node → sampling → custom → Feedback Sampler**
    - `color_coherence`: LAB (prevents color drift)
 3. Connect `all_latents` → VAE Decode → Video Combine
 
-## ⚙️ Key Parameters
+## Key Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -67,7 +67,7 @@ Find node at: **Add Node → sampling → custom → Feedback Sampler**
 | `noise_amount` | 0.02 | Prevents stagnation (0-1) |
 | `sharpen_amount` | 0.1 | Anti-blur strength (0-1) |
 
-## 🎯 Recommended Settings
+## Recommended Settings
 
 **Smooth Animation:**
 ```
@@ -85,19 +85,19 @@ color_coherence: LAB
 sharpen_amount: 0.1-0.2
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 - **Black frames:** Connect VAE to node
 - **Blurry:** Increase `sharpen_amount` to 0.2+
 - **Color bleeding:** Use `color_coherence: LAB`
 - **Too much change:** Lower `feedback_denoise` to 0.2-0.3
 
-## 📝 Credits
+## Credits
 
 - Inspired by [Deforum Stable Diffusion](https://github.com/deforum-art/sd-webui-deforum)
 - LAB color coherence based on Deforum's implementation
 
-## 📄 License
+## License
 
 MIT License - See [LICENSE](LICENSE)
 
