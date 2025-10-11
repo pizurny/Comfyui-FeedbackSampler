@@ -1,6 +1,6 @@
 # ComfyUI Feedback Sampler
 
-A custom ComfyUI node for creating **Deforum-style zoom animations** through iterative feedback loop.
+A custom ComfyUI sampler for creating **Deforum-style zoom animations** through iterative feedback loop.
 
 ![Demo](demo.gif)
 
