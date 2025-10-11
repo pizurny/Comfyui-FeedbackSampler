@@ -4,7 +4,7 @@ A custom ComfyUI sampler for creating **Deforum-style zoom animations** through 
 
 ![Demo](demo.gif)
 
-> **Work in Progress** - Active development, features and parameters may change
+> **Work in Progress** 
 
 ## Features
 
@@ -92,10 +92,6 @@ sharpen_amount: 0.1-0.2
 - **Color bleeding:** Use `color_coherence: LAB`
 - **Too much change:** Lower `feedback_denoise` to 0.2-0.3
 
-## Credits
-
-- Inspired by [Deforum Stable Diffusion](https://github.com/deforum-art/sd-webui-deforum)
-- LAB color coherence based on Deforum's implementation
 
 ## License
 
