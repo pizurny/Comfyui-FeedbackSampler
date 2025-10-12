@@ -31,7 +31,7 @@ class FeedbackSampler:
             "required": {
                 # === Standard KSampler Parameters ===
                 "model": ("MODEL",),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1}),
                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
@@ -42,17 +42,17 @@ class FeedbackSampler:
                 "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 
                 # === Animation Parameters ===
-                "zoom_value": ("FLOAT", {"default": 0.01, "min": -0.5, "max": 0.5, "step": 0.0001, "round": 0.0001}),
-                "iterations": ("INT", {"default": 5, "min": 1, "max": 100}),
-                "feedback_denoise": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "seed_variation": (["fixed", "increment", "random"], {"default": "fixed"}),
+                "zoom_value": ("FLOAT", {"default": 0.05, "min": -0.5, "max": 0.5, "step": 0.0001, "round": 0.0001}),
+                "iterations": ("INT", {"default": 10, "min": 1, "max": 1000000}),
+                "feedback_denoise": ("FLOAT", {"default": 0.4, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "seed_variation": (["fixed", "increment", "random"], {"default": "increment"}),
                 
                 # === Color & Quality Enhancement ===
                 "color_coherence": (["None", "LAB", "RGB", "HSV"], {"default": "LAB"}),
-                "noise_amount": ("FLOAT", {"default": 0.02, "min": 0.0, "max": 1.0, "step": 0.001, "round": 0.001}),
+                "noise_amount": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.001, "round": 0.001}),
                 "noise_type": (["gaussian", "perlin"], {"default": "perlin"}),
-                "sharpen_amount": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "contrast_boost": ("FLOAT", {"default": 1.0, "min": 0.8, "max": 1.5, "step": 0.01}),
+                "sharpen_amount": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "contrast_boost": ("FLOAT", {"default": 0.9, "min": 0.8, "max": 1.5, "step": 0.01}),
             },
             "optional": {
                 "vae": ("VAE",),
