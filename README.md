@@ -1,10 +1,10 @@
 # ComfyUI Feedback Sampler
 
 A custom ComfyUI sampler for creating **Deforum-style zoom animations** through iterative feedback loop.
-
+> **Work in Progress** 
 ![Demo](demo.gif)
 
-> **Work in Progress** 
+> **Example use with SDXLTurbo model** 
 
 ## Features
 
