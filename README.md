@@ -24,7 +24,8 @@ Works with:
 - Stable Diffusion 1.5
 - SDXL
 - Flux models
-- Basically any model thats compatible with native Ksampler, turbo/lighting models are recommended for faster iteration
+- Basically any model thats compatible with native Ksampler
+- Turbo/lighting models are recommended for faster iteration
 
 ## Installation
 
