@@ -1,0 +1,18 @@
+[project]
+name = "feedback-sampler"
+description = "Create Deforum-style zoom animations through iterative feedback loop with LAB color coherence and anti-blur sharpening"
+version = "1.0.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = [
+    "scipy>=1.9.0"
+]
+
+[project.urls]
+Repository = "https://github.com/pizurny/Comfyui-FeedbackSampler"
+"Bug Tracker" = "https://github.com/pizurny/Comfyui-FeedbackSampler/issues"
+
+[tool.comfy]
+PublisherId = "pizurny"
+DisplayName = "Feedback Sampler"
+Icon = ""
