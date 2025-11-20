@@ -102,7 +102,7 @@ MIT License - See [LICENSE](LICENSE)
 
 ---
 
-**Example workflow included:** 
+**Example workflow included:**   
 `Feedback_Sampler_Flux.json`  
 `Feedback_Sampler_SD1.5.json`  
 `Feedback_Sampler_SD1.5_custom_startframe.json`  
