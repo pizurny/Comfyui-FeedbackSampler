@@ -9,6 +9,7 @@ import latent_preview
 import numpy as np
 from PIL import Image
 import copy
+import math
 
 # Try to import scipy for sharpening and noise
 try:
@@ -45,6 +46,10 @@ class FeedbackSampler:
                 
                 # === Animation Parameters ===
                 "zoom_value": ("FLOAT", {"default": 0.05, "min": -0.5, "max": 0.5, "step": 0.0001, "round": 0.0001}),
+                "translate_x": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+                "translate_y": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step": 0.1, "round": 0.01}),
+                "angle": ("FLOAT", {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.1, "round": 0.01}),
+                "border_mode": (["zeros", "border", "reflection"], {"default": "zeros"}),
                 "iterations": ("INT", {"default": 10, "min": 1, "max": 1000000}),
                 "feedback_denoise": ("FLOAT", {"default": 0.4, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "seed_variation": (["fixed", "increment", "random"], {"default": "increment"}),
@@ -530,57 +535,51 @@ class FeedbackSampler:
         # Clip and convert back
         return np.clip(contrasted, 0, 255).astype(np.uint8)
     
-    def zoom_latent(self, latent, zoom_factor):
+    def transform_latent(self, latent, zoom_factor, angle_deg, translate_x, translate_y, border_mode="zeros"):
         """
-        Apply zoom transformation to latent tensor.
-        Positive zoom_factor = zoom in (scale up)
-        Negative zoom_factor = zoom out (scale down)
-        Zero = no change
+        Apply unified affine transformation (zoom + rotate + translate) to latent tensor.
+        Uses F.affine_grid + F.grid_sample for GPU-accelerated transforms.
+
+        Args:
+            latent: (B, C, H, W) tensor
+            zoom_factor: zoom amount (positive = zoom in, negative = zoom out)
+            angle_deg: rotation in degrees (positive = counterclockwise)
+            translate_x: horizontal shift in image-space pixels (positive = camera pans right)
+            translate_y: vertical shift in image-space pixels (positive = camera pans down)
+            border_mode: "zeros", "border", or "reflection"
         """
-        if zoom_factor == 0:
+        if zoom_factor == 0 and angle_deg == 0 and translate_x == 0 and translate_y == 0:
             return latent
-        
-        # Calculate scale factor (1 + zoom means zoom in, 1 - zoom means zoom out)
-        scale = 1.0 + zoom_factor
-        
-        # Get original dimensions
+
         batch, channels, height, width = latent.shape
-        
-        # Calculate new dimensions for zoom
-        if zoom_factor > 0:  # Zoom in - sample from center
-            new_height = int(height / scale)
-            new_width = int(width / scale)
-            
-            # Calculate crop coordinates (center crop)
-            top = (height - new_height) // 2
-            left = (width - new_width) // 2
-            
-            # Crop center region
-            cropped = latent[:, :, top:top+new_height, left:left+new_width]
-            
-            # Scale back to original size
-            zoomed = F.interpolate(cropped, size=(height, width), mode='bilinear', align_corners=False)
-            
-        else:  # Zoom out - scale down and pad
-            new_height = int(height * scale)
-            new_width = int(width * scale)
-            
-            # Scale down
-            scaled = F.interpolate(latent, size=(new_height, new_width), mode='bilinear', align_corners=False)
-            
-            # Create padded tensor
-            pad_top = (height - new_height) // 2
-            pad_left = (width - new_width) // 2
-            pad_bottom = height - new_height - pad_top
-            pad_right = width - new_width - pad_left
-            
-            # Pad to original size (padding with zeros)
-            zoomed = F.pad(scaled, (pad_left, pad_right, pad_top, pad_bottom), mode='constant', value=0)
-        
-        return zoomed
+
+        # Build affine matrix
+        # grid_sample maps output→input, so we invert: scale = 1/(1+zoom)
+        s = 1.0 / (1.0 + zoom_factor)
+        a = math.radians(angle_deg)
+
+        cos_a = math.cos(a)
+        sin_a = math.sin(a)
+
+        # Translate in latent space (image pixels / 8), normalized to [-1, 1] grid coords
+        # Negative sign because grid_sample uses output→input mapping
+        tx_norm = -(translate_x / 8.0) / (width / 2.0)
+        ty_norm = -(translate_y / 8.0) / (height / 2.0)
+
+        # 2x3 affine matrix: scale * rotation + translation
+        theta = torch.tensor([
+            [s * cos_a,  s * sin_a, tx_norm],
+            [-s * sin_a, s * cos_a, ty_norm]
+        ], dtype=latent.dtype, device=latent.device).unsqueeze(0).expand(batch, -1, -1)
+
+        grid = F.affine_grid(theta, latent.shape, align_corners=False)
+        transformed = F.grid_sample(latent, grid, mode='bilinear', padding_mode=border_mode, align_corners=False)
+
+        return transformed
     
-    def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, 
-               latent_image, denoise, zoom_value, iterations, feedback_denoise, seed_variation,
+    def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative,
+               latent_image, denoise, zoom_value, translate_x, translate_y, angle, border_mode,
+               iterations, feedback_denoise, seed_variation,
                color_coherence, noise_amount, noise_type="perlin", sharpen_amount=0.1, contrast_boost=1.0, vae=None):
         """
         Main sampling function with feedback loop, zoom, and color coherence.
@@ -610,7 +609,7 @@ class FeedbackSampler:
         latent_format = latent_image.copy()
         
         # First iteration with full denoise
-        print(f"FeedbackSampler v1.5.0: Starting iteration 1/{iterations} with denoise={denoise}")
+        print(f"FeedbackSampler v1.6.0: Starting iteration 1/{iterations} with denoise={denoise}")
         latent_format["samples"] = current_latent
         
         # Get frame-specific conditioning for first iteration
@@ -644,10 +643,10 @@ class FeedbackSampler:
             
             # Log with CN frame info if applicable
             cn_info = f" | CN frame={i % cn_frame_count}" if cn_frame_count > 1 else ""
-            print(f"FeedbackSampler: Iteration {i+1}/{iterations} | zoom={zoom_value} | denoise={feedback_denoise} | seed={iteration_seed} | noise={noise_amount}({noise_type}) | sharpen={sharpen_amount}{cn_info}")
+            print(f"FeedbackSampler: Iteration {i+1}/{iterations} | zoom={zoom_value} | tx={translate_x} ty={translate_y} | angle={angle} | border={border_mode} | denoise={feedback_denoise} | seed={iteration_seed} | noise={noise_amount}({noise_type}) | sharpen={sharpen_amount}{cn_info}")
             
-            # Apply zoom transformation
-            zoomed_latent = self.zoom_latent(current_latent, zoom_value)
+            # Apply affine transformation (zoom + rotate + translate)
+            zoomed_latent = self.transform_latent(current_latent, zoom_value, angle, translate_x, translate_y, border_mode)
             
             # CRITICAL: Apply color coherence + enhancements BEFORE generation
             if color_coherence != "None" and vae is not None and color_reference is not None:

@@ -9,7 +9,7 @@ A custom ComfyUI sampler for creating **Deforum-style zoom animations** through 
 
 ## Features
 
-- **Feedback Loop Animation** - Iterative sampling with zoom in/out
+- **Feedback Loop Animation** - Iterative sampling with zoom, pan, and rotate
 - **ControlNet Sequence Support** - Automatically detects batched hint images and applies per-frame ControlNet conditioning with automatic looping
 - **LAB Color Coherence** - Deforum-inspired color matching prevents chromatic drift
 - **Anti-Blur Sharpening** - Maintains detail at low denoise values
@@ -65,6 +65,10 @@ Find node at: **Add Node → sampling → custom → Feedback Sampler**
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `zoom_value` | 0.01 | Zoom speed (-0.5 to 0.5) |
+| `translate_x` | 0.0 | Horizontal pan in pixels/frame (-100 to 100). Positive = camera pans right |
+| `translate_y` | 0.0 | Vertical pan in pixels/frame (-100 to 100). Positive = camera pans down |
+| `angle` | 0.0 | Rotation in degrees/frame (-180 to 180). Positive = counterclockwise |
+| `border_mode` | zeros | Fill for out-of-bounds areas (zeros/border/reflection) |
 | `iterations` | 5 | Number of frames |
 | `feedback_denoise` | 0.3 | Strength per frame (0-1) |
 | `color_coherence` | LAB | Color matching (None/LAB/RGB/HSV) |
@@ -87,6 +91,32 @@ feedback_denoise: 0.35-0.45
 zoom_value: 0.01-0.02
 color_coherence: LAB
 sharpen_amount: 0.1-0.2
+```
+
+**Pan Flythrough:**
+```
+zoom_value: 0.005
+translate_x: 5-15
+angle: 0
+border_mode: reflection
+feedback_denoise: 0.3-0.4
+```
+
+**Spiral Zoom:**
+```
+zoom_value: 0.02
+angle: 1-3
+translate_x: 0
+border_mode: border
+feedback_denoise: 0.3
+```
+
+**Slow Rotate:**
+```
+zoom_value: 0
+angle: 0.5-2
+border_mode: reflection
+feedback_denoise: 0.25-0.35
 ```
 
 ## ControlNet Sequences
