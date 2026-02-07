@@ -609,7 +609,7 @@ class FeedbackSampler:
         latent_format = latent_image.copy()
         
         # First iteration with full denoise
-        print(f"FeedbackSampler v1.6.0: Starting iteration 1/{iterations} with denoise={denoise}")
+        print(f"FeedbackSampler v2.0.0: Starting iteration 1/{iterations} with denoise={denoise}")
         latent_format["samples"] = current_latent
         
         # Get frame-specific conditioning for first iteration
