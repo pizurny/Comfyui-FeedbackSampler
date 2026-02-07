@@ -10,6 +10,7 @@ A custom ComfyUI sampler for creating **Deforum-style zoom animations** through 
 ## Features
 
 - **Feedback Loop Animation** - Iterative sampling with zoom in/out
+- **ControlNet Sequence Support** - Automatically detects batched hint images and applies per-frame ControlNet conditioning with automatic looping
 - **LAB Color Coherence** - Deforum-inspired color matching prevents chromatic drift
 - **Anti-Blur Sharpening** - Maintains detail at low denoise values
 - **Noise Injection** - Prevents stagnation (Gaussian/Perlin)
@@ -87,6 +88,17 @@ zoom_value: 0.01-0.02
 color_coherence: LAB
 sharpen_amount: 0.1-0.2
 ```
+
+## ControlNet Sequences
+
+The Feedback Sampler automatically detects batched ControlNet hint images and applies them per-frame:
+
+1. Load your ControlNet image sequence (e.g. using Load Image Batch)
+2. Connect the batched images to your ControlNet Apply node as usual
+3. Connect the ControlNet conditioning to the Feedback Sampler's positive input
+4. The sampler will use one hint image per iteration, looping automatically if iterations > frames
+
+This enables guided animations where each frame follows a different ControlNet reference — useful for motion-guided zoom animations or style sequences.
 
 ## Troubleshooting
 

@@ -8,6 +8,7 @@ import nodes
 import latent_preview
 import numpy as np
 from PIL import Image
+import copy
 
 # Try to import scipy for sharpening and noise
 try:
@@ -23,6 +24,7 @@ class FeedbackSampler:
     A sampler that feeds finished latent back into itself with zoom functionality.
     Creates deforum-style zooming animations through iterative feedback loops.
     Includes LAB color matching to prevent color bleeding.
+    Supports ControlNet sequences - automatically detects batched hint images.
     """
     
     @classmethod
@@ -63,6 +65,59 @@ class FeedbackSampler:
     RETURN_NAMES = ("final_latent", "all_latents")
     FUNCTION = "sample"
     CATEGORY = "sampling/custom"
+    
+    # ========================================
+    # ControlNet Sequence Support
+    # ========================================
+    
+    def get_controlnet_frame_count(self, conditioning):
+        """
+        Detect number of frames in ControlNet conditioning.
+        Returns 1 if no ControlNet or single image.
+        """
+        try:
+            control = conditioning[0][1].get('control')
+            if control is None:
+                return 1
+            
+            hint = getattr(control, 'cond_hint_original', None)
+            if hint is not None and hasattr(hint, 'shape'):
+                return hint.shape[0]
+        except (IndexError, KeyError, AttributeError):
+            pass
+        
+        return 1
+
+    def get_conditioning_for_frame(self, conditioning, frame_idx):
+        """
+        Extract single frame from batched ControlNet conditioning.
+        Returns original conditioning if no ControlNet or single frame.
+        Loops automatically when frame_idx >= num_frames.
+        """
+        try:
+            control = conditioning[0][1].get('control')
+            if control is None:
+                return conditioning
+            
+            hint = getattr(control, 'cond_hint_original', None)
+            if hint is None or hint.shape[0] <= 1:
+                return conditioning
+            
+            # Deep copy the structure to avoid modifying original
+            cond = copy.deepcopy(conditioning)
+            
+            # Slice the hint for this frame (with looping)
+            actual_idx = frame_idx % hint.shape[0]
+            cond[0][1]['control'].cond_hint_original = hint[actual_idx:actual_idx+1]
+            
+            return cond
+            
+        except (IndexError, KeyError, AttributeError):
+            return conditioning
+    
+    # ========================================
+    # Color Matching Functions
+    # ========================================
     
     def match_color_histogram(self, source, reference, mode="LAB"):
         """
@@ -529,6 +584,7 @@ class FeedbackSampler:
                color_coherence, noise_amount, noise_type="perlin", sharpen_amount=0.1, contrast_boost=1.0, vae=None):
         """
         Main sampling function with feedback loop, zoom, and color coherence.
+        Now supports ControlNet sequences - automatically detects and uses per-frame hints.
         """
         import random
         
@@ -537,6 +593,14 @@ class FeedbackSampler:
             print("WARNING: Color coherence requested but no VAE provided. Disabling color coherence.")
             color_coherence = "None"
         
+        # Detect ControlNet sequence
+        cn_frame_count = self.get_controlnet_frame_count(positive)
+        if cn_frame_count > 1:
+            print(f"FeedbackSampler: Detected ControlNet sequence with {cn_frame_count} frames (will loop)")
+        
+        # Progress bar for UI feedback
+        pbar = comfy.utils.ProgressBar(iterations)
+
         # Store all latents for output
         all_latents = []
         color_reference = None  # Store first frame for color matching
@@ -546,18 +610,23 @@ class FeedbackSampler:
         latent_format = latent_image.copy()
         
         # First iteration with full denoise
-        print(f"FeedbackSampler v1.4.3: Starting iteration 1/{iterations} with denoise={denoise}")
+        print(f"FeedbackSampler v1.5.0: Starting iteration 1/{iterations} with denoise={denoise}")
         latent_format["samples"] = current_latent
+        
+        # Get frame-specific conditioning for first iteration
+        frame_positive = self.get_conditioning_for_frame(positive, 0)
+        frame_negative = self.get_conditioning_for_frame(negative, 0)
         
         # Sample first iteration
         result = nodes.common_ksampler(
             model, seed, steps, cfg, sampler_name, scheduler,
-            positive, negative, latent_format, denoise=denoise
+            frame_positive, frame_negative, latent_format, denoise=denoise
         )
         
         current_latent = result[0]["samples"]
         all_latents.append(current_latent.clone())
-        
+        pbar.update_absolute(1)
+
         # Store first frame as color reference
         if color_coherence != "None" and vae is not None:
             color_reference = self.latent_to_image(current_latent, vae)
@@ -573,7 +642,9 @@ class FeedbackSampler:
             else:  # random
                 iteration_seed = random.randint(0, 0xffffffffffffffff)
             
-            print(f"FeedbackSampler: Iteration {i+1}/{iterations} | zoom={zoom_value} | denoise={feedback_denoise} | seed={iteration_seed} | noise={noise_amount}({noise_type}) | sharpen={sharpen_amount}")
+            # Log with CN frame info if applicable
+            cn_info = f" | CN frame={i % cn_frame_count}" if cn_frame_count > 1 else ""
+            print(f"FeedbackSampler: Iteration {i+1}/{iterations} | zoom={zoom_value} | denoise={feedback_denoise} | seed={iteration_seed} | noise={noise_amount}({noise_type}) | sharpen={sharpen_amount}{cn_info}")
             
             # Apply zoom transformation
             zoomed_latent = self.zoom_latent(current_latent, zoom_value)
@@ -629,15 +700,20 @@ class FeedbackSampler:
             # Prepare for next sampling
             latent_format["samples"] = zoomed_latent
             
+            # Get frame-specific conditioning for this iteration
+            frame_positive = self.get_conditioning_for_frame(positive, i)
+            frame_negative = self.get_conditioning_for_frame(negative, i)
+            
             # Sample with feedback denoise value
             result = nodes.common_ksampler(
                 model, iteration_seed, steps, cfg, sampler_name, scheduler,
-                positive, negative, latent_format, denoise=feedback_denoise
+                frame_positive, frame_negative, latent_format, denoise=feedback_denoise
             )
             
             current_latent = result[0]["samples"]
             all_latents.append(current_latent.clone())
-        
+            pbar.update_absolute(i + 1)
+
         # Stack all latents for batch output
         all_latents_stacked = torch.cat(all_latents, dim=0)
         

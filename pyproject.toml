@@ -1,7 +1,7 @@
 [project]
 name = "feedback-sampler"
-description = "Create Deforum-style zoom animations through iterative feedback loop with LAB color coherence and anti-blur sharpening"
-version = "1.0.1"
+description = "Create Deforum-style zoom animations through iterative feedback loop with LAB color coherence, anti-blur sharpening, and ControlNet sequence support"
+version = "1.5.0"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
 dependencies = [
