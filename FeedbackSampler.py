@@ -4,7 +4,6 @@ from comfy.samplers import KSampler
 import comfy.sample
 import comfy.samplers
 import comfy.utils
-import nodes
 import latent_preview
 import numpy as np
 from PIL import Image
@@ -576,7 +575,58 @@ class FeedbackSampler:
         transformed = F.grid_sample(latent, grid, mode='bilinear', padding_mode=border_mode, align_corners=False)
 
         return transformed
-    
+
+    # ========================================
+    # Safe KSampler (preview-crash-proof)
+    # ========================================
+
+    def _safe_prepare_callback(self, model, steps):
+        """Prepare a sampling callback that won't crash if latent preview fails.
+
+        This wraps the preview decode in try/except so that models with
+        non-standard latent channel counts (e.g. flux-klein with 32ch vs
+        the expected 128ch) don't kill the entire sampling process.
+        """
+        preview_format = "JPEG"
+        if hasattr(latent_preview, 'get_previewer'):
+            previewer = latent_preview.get_previewer(model.load_device, model.model.latent_format)
+        else:
+            previewer = None
+        pbar = comfy.utils.ProgressBar(steps)
+
+        def callback(step, x0, x, total_steps):
+            preview_bytes = None
+            if previewer:
+                try:
+                    preview_bytes = previewer.decode_latent_to_preview_image(preview_format, x0)
+                except Exception:
+                    pass
+            pbar.update_absolute(step + 1, total_steps, preview_bytes)
+
+        return callback
+
+    def _safe_ksampler(self, model, seed, steps, cfg, sampler_name, scheduler,
+                       positive, negative, latent, denoise=1.0):
+        """Replicates nodes.common_ksampler() but with crash-proof preview callback."""
+        latent_image = latent["samples"]
+        latent_image = comfy.sample.fix_empty_latent_channels(model, latent_image)
+
+        batch_inds = latent.get("batch_index", None)
+        noise = comfy.sample.prepare_noise(latent_image, seed, batch_inds)
+
+        noise_mask = latent.get("noise_mask", None)
+
+        callback = self._safe_prepare_callback(model, steps)
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+
+        samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler,
+                                      positive, negative, latent_image,
+                                      denoise=denoise, noise_mask=noise_mask,
+                                      callback=callback, disable_pbar=disable_pbar, seed=seed)
+        out = latent.copy()
+        out["samples"] = samples
+        return (out,)
+
     def sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative,
                latent_image, denoise, zoom_value, translate_x, translate_y, angle, border_mode,
                iterations, feedback_denoise, seed_variation,
@@ -617,7 +667,7 @@ class FeedbackSampler:
         frame_negative = self.get_conditioning_for_frame(negative, 0)
         
         # Sample first iteration
-        result = nodes.common_ksampler(
+        result = self._safe_ksampler(
             model, seed, steps, cfg, sampler_name, scheduler,
             frame_positive, frame_negative, latent_format, denoise=denoise
         )
@@ -704,7 +754,7 @@ class FeedbackSampler:
             frame_negative = self.get_conditioning_for_frame(negative, i)
             
             # Sample with feedback denoise value
-            result = nodes.common_ksampler(
+            result = self._safe_ksampler(
                 model, iteration_seed, steps, cfg, sampler_name, scheduler,
                 frame_positive, frame_negative, latent_format, denoise=feedback_denoise
             )
